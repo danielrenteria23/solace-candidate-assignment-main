@@ -8,7 +8,12 @@ const setup = () => {
       select: () => ({
         from: () => [],
       }),
-    };
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.resolve([]),
+        }),
+      }),
+    } as any;
   }
 
   // for query purposes
