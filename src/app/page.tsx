@@ -12,18 +12,8 @@ import {
 } from "react-icons/fi";
 import Header from "@/components/Header";
 import TableSkeleton from "@/components/TableSkeleton";
-
-interface Advocate {
-  id: number;
-  firstName: string;
-  lastName: string;
-  city: string;
-  degree: string;
-  specialties: string[];
-  yearsOfExperience: number;
-  phoneNumber: number;
-  createdAt: string;
-}
+import { useAdvocates } from "@/hooks/useAdvocates";
+import { useDebounce } from "@/hooks/useDebounce";
 
 const experienceRanges = [
   { label: "0-2 years", value: "0-2", min: 0, max: 2 },
@@ -36,8 +26,6 @@ function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [advocates, setAdvocates] = useState<Advocate[]>([]);
-  const [filteredAdvocates, setFilteredAdvocates] = useState<Advocate[]>([]);
   const [searchTerm, setSearchTerm] = useState(
     searchParams.get("search") || "",
   );
@@ -53,41 +41,29 @@ function HomeContent() {
   const [selectedExperience, setSelectedExperience] = useState(
     searchParams.get("experience") || "",
   );
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [debugError, setDebugError] = useState<string | null>(null);
+  const [debugLoading, setDebugLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
 
-  useEffect(() => {
-    const fetchAdvocates = async () => {
-      try {
-        console.log("fetching advocates...");
-        const response = await fetch("/api/advocates");
+  // Only debounce the search input (text field), not dropdowns
+  const debouncedSearch = useDebounce(searchTerm, 300);
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch advocates");
-        }
+  // Fetch advocates with TanStack Query - cache key includes all filter params
+  const { data: advocates = [], isLoading, error } = useAdvocates({
+    search: debouncedSearch,
+    degree: selectedDegree,
+    city: selectedCity,
+    specialty: selectedSpecialty,
+    experience: selectedExperience,
+  });
 
-        const jsonResponse = await response.json();
-        setAdvocates(jsonResponse.data);
-        setFilteredAdvocates(jsonResponse.data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
-        console.error("Error fetching advocates:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAdvocates();
-  }, []);
-
-  // Update URL when filters change
+  // Update URL when filters change (debounced for search only)
   useEffect(() => {
     const params = new URLSearchParams();
-    if (searchTerm) params.set("search", searchTerm);
+    if (debouncedSearch) params.set("search", debouncedSearch);
     if (selectedDegree) params.set("degree", selectedDegree);
     if (selectedCity) params.set("city", selectedCity);
     if (selectedSpecialty) params.set("specialty", selectedSpecialty);
@@ -97,7 +73,7 @@ function HomeContent() {
     const newUrl = queryString ? `?${queryString}` : "/";
     router.replace(newUrl, { scroll: false });
   }, [
-    searchTerm,
+    debouncedSearch,
     selectedDegree,
     selectedCity,
     selectedSpecialty,
@@ -116,59 +92,53 @@ function HomeContent() {
     return { degrees, cities, specialties };
   }, [advocates]);
 
-  // Apply all filters
-  useEffect(() => {
-    const applyFilters = () => {
-      const searchLower = searchTerm.toLowerCase();
+  // Apply all filters (only search is debounced)
+  const filteredAdvocates = useMemo(() => {
+    const searchLower = debouncedSearch.toLowerCase();
 
-      const filtered = advocates.filter((advocate) => {
-        const matchesSearch =
-          !searchTerm ||
-          advocate.firstName.toLowerCase().includes(searchLower) ||
-          advocate.lastName.toLowerCase().includes(searchLower) ||
-          advocate.city.toLowerCase().includes(searchLower) ||
-          advocate.degree.toLowerCase().includes(searchLower) ||
-          advocate.specialties.some((specialty) =>
-            specialty.toLowerCase().includes(searchLower),
-          ) ||
-          advocate.yearsOfExperience.toString().includes(searchLower);
+    return advocates.filter((advocate) => {
+      const matchesSearch =
+        !debouncedSearch ||
+        advocate.firstName.toLowerCase().includes(searchLower) ||
+        advocate.lastName.toLowerCase().includes(searchLower) ||
+        advocate.city.toLowerCase().includes(searchLower) ||
+        advocate.degree.toLowerCase().includes(searchLower) ||
+        advocate.specialties.some((specialty) =>
+          specialty.toLowerCase().includes(searchLower),
+        ) ||
+        advocate.yearsOfExperience.toString().includes(searchLower);
 
-        const matchesDegree =
-          !selectedDegree || advocate.degree === selectedDegree;
+      const matchesDegree =
+        !selectedDegree || advocate.degree === selectedDegree;
 
-        const matchesCity = !selectedCity || advocate.city === selectedCity;
+      const matchesCity = !selectedCity || advocate.city === selectedCity;
 
-        const matchesSpecialty =
-          !selectedSpecialty ||
-          advocate.specialties.includes(selectedSpecialty);
+      const matchesSpecialty =
+        !selectedSpecialty ||
+        advocate.specialties.includes(selectedSpecialty);
 
-        let matchesExperience = true;
-        if (selectedExperience) {
-          const range = experienceRanges.find(
-            (r) => r.value === selectedExperience,
-          );
-          if (range) {
-            matchesExperience =
-              advocate.yearsOfExperience >= range.min &&
-              advocate.yearsOfExperience <= range.max;
-          }
-        }
-
-        return (
-          matchesSearch &&
-          matchesDegree &&
-          matchesCity &&
-          matchesSpecialty &&
-          matchesExperience
+      let matchesExperience = true;
+      if (selectedExperience) {
+        const range = experienceRanges.find(
+          (r) => r.value === selectedExperience,
         );
-      });
+        if (range) {
+          matchesExperience =
+            advocate.yearsOfExperience >= range.min &&
+            advocate.yearsOfExperience <= range.max;
+        }
+      }
 
-      setFilteredAdvocates(filtered);
-    };
-
-    applyFilters();
+      return (
+        matchesSearch &&
+        matchesDegree &&
+        matchesCity &&
+        matchesSpecialty &&
+        matchesExperience
+      );
+    });
   }, [
-    searchTerm,
+    debouncedSearch,
     selectedDegree,
     selectedCity,
     selectedSpecialty,
@@ -199,17 +169,20 @@ function HomeContent() {
     }
   };
 
-  if (error) {
+  const displayError = debugError || (error ? error.message : null);
+  const displayLoading = debugLoading || isLoading;
+
+  if (displayError) {
     return (
       <div className={darkMode ? "dark" : ""}>
         <div className="min-h-screen bg-gray-50 transition-colors dark:bg-gray-900">
           <Header
             darkMode={darkMode}
             setDarkMode={setDarkMode}
-            loading={loading}
-            setLoading={setLoading}
-            error={error}
-            setError={setError}
+            loading={debugLoading}
+            setLoading={setDebugLoading}
+            error={debugError}
+            setError={setDebugError}
           />
           <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
             <p className="mb-6 text-xl text-gray-600 dark:text-gray-400">
@@ -227,7 +200,9 @@ function HomeContent() {
               <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">
                 Something went wrong
               </h3>
-              <p className="mt-2 text-red-600 dark:text-red-400">{error}</p>
+              <p className="mt-2 text-red-600 dark:text-red-400">
+                {displayError}
+              </p>
             </div>
           </main>
         </div>
@@ -241,10 +216,10 @@ function HomeContent() {
         <Header
           darkMode={darkMode}
           setDarkMode={setDarkMode}
-          loading={loading}
-          setLoading={setLoading}
-          error={error}
-          setError={setError}
+          loading={debugLoading}
+          setLoading={setDebugLoading}
+          error={debugError}
+          setError={setDebugError}
         />
 
         <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -270,14 +245,14 @@ function HomeContent() {
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search by name, city, degree, or specialty..."
-                    disabled={loading}
+                    disabled={displayLoading}
                     className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:ring-blue-400"
                     aria-label="Search advocates by name, city, degree, or specialty"
                   />
                   <div className="flex gap-2">
                     <button
                       onClick={resetFilters}
-                      disabled={loading}
+                      disabled={displayLoading}
                       className="flex-1 rounded-lg border border-gray-300 bg-gray-100 px-6 py-3 font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 sm:flex-none"
                       aria-label="Reset all filters"
                     >
@@ -289,7 +264,7 @@ function HomeContent() {
                         onClick={copyUrlToClipboard}
                         onMouseEnter={() => setShowTooltip(true)}
                         onMouseLeave={() => setShowTooltip(false)}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="rounded-lg border border-gray-300 bg-gray-100 px-3 py-3 text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                         aria-label="Copy URL to clipboard"
                       >
@@ -333,7 +308,7 @@ function HomeContent() {
                         id="degree-filter"
                         value={selectedDegree}
                         onChange={(e) => setSelectedDegree(e.target.value)}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white px-4 py-3 pr-10 text-gray-900 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:ring-blue-400"
                         aria-label="Filter by degree"
                       >
@@ -360,7 +335,7 @@ function HomeContent() {
                         id="city-filter"
                         value={selectedCity}
                         onChange={(e) => setSelectedCity(e.target.value)}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white px-4 py-3 pr-10 text-gray-900 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:ring-blue-400"
                         aria-label="Filter by city"
                       >
@@ -389,7 +364,7 @@ function HomeContent() {
                         id="specialty-filter"
                         value={selectedSpecialty}
                         onChange={(e) => setSelectedSpecialty(e.target.value)}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white px-4 py-3 pr-10 text-gray-900 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:ring-blue-400"
                         aria-label="Filter by specialty"
                       >
@@ -416,7 +391,7 @@ function HomeContent() {
                         id="experience-filter"
                         value={selectedExperience}
                         onChange={(e) => setSelectedExperience(e.target.value)}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white px-4 py-3 pr-10 text-gray-900 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:ring-blue-400"
                         aria-label="Filter by years of experience"
                       >
@@ -447,7 +422,7 @@ function HomeContent() {
                     {searchTerm && (
                       <button
                         onClick={() => setSearchTerm("")}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="inline-flex items-center gap-2 rounded-lg bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800 transition-colors hover:bg-blue-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800"
                         aria-label="Clear search filter"
                       >
@@ -458,7 +433,7 @@ function HomeContent() {
                     {selectedDegree && (
                       <button
                         onClick={() => setSelectedDegree("")}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="inline-flex items-center gap-2 rounded-md bg-purple-100 px-3 py-1 text-xs font-medium text-purple-800 transition-colors hover:bg-purple-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-purple-900 dark:text-purple-200 dark:hover:bg-purple-800"
                         aria-label={`Clear degree filter: ${selectedDegree}`}
                       >
@@ -469,7 +444,7 @@ function HomeContent() {
                     {selectedCity && (
                       <button
                         onClick={() => setSelectedCity("")}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="inline-flex items-center gap-2 rounded-md bg-green-100 px-3 py-1 text-xs font-medium text-green-800 transition-colors hover:bg-green-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-900 dark:text-green-200 dark:hover:bg-green-800"
                         aria-label={`Clear city filter: ${selectedCity}`}
                       >
@@ -480,7 +455,7 @@ function HomeContent() {
                     {selectedSpecialty && (
                       <button
                         onClick={() => setSelectedSpecialty("")}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="inline-flex items-center gap-2 rounded-md bg-orange-100 px-3 py-1 text-xs font-medium text-orange-800 transition-colors hover:bg-orange-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-orange-900 dark:text-orange-200 dark:hover:bg-orange-800"
                         aria-label={`Clear specialty filter: ${selectedSpecialty}`}
                       >
@@ -491,7 +466,7 @@ function HomeContent() {
                     {selectedExperience && (
                       <button
                         onClick={() => setSelectedExperience("")}
-                        disabled={loading}
+                        disabled={displayLoading}
                         className="inline-flex items-center gap-2 rounded-md bg-pink-100 px-3 py-1 text-xs font-medium text-pink-800 transition-colors hover:bg-pink-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-pink-900 dark:text-pink-200 dark:hover:bg-pink-800"
                         aria-label={`Clear experience filter: ${
                           experienceRanges.find(
@@ -521,7 +496,7 @@ function HomeContent() {
             aria-atomic="true"
           >
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              {loading ? (
+              {displayLoading ? (
                 "Loading advocates..."
               ) : (
                 <>
@@ -533,7 +508,7 @@ function HomeContent() {
           </div>
 
           {/* Table Data*/}
-          {loading ? (
+          {displayLoading ? (
             <TableSkeleton />
           ) : filteredAdvocates.length === 0 ? (
             <div
